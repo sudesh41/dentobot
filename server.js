@@ -6,13 +6,39 @@ const app = express();
 app.use(express.urlencoded({ extended: false }));
 
 const VOICEFLOW_API_KEY = process.env.VOICEFLOW_API_KEY;
+const SHEETY_URL = process.env.SHEETY_URL;
 const sessions = {};
+
+// Save to Google Sheets
+const saveToSheet = async (phone, message) => {
+  if (!SHEETY_URL) return;
+  try {
+    await axios.post(SHEETY_URL, {
+      sheet1: {
+        timestamp: new Date().toLocaleString('en-IN', {
+          timeZone: 'Asia/Kolkata'
+        }),
+        patientPhone: phone.replace('whatsapp:+', '+'),
+        message: message,
+        name: '',
+        notes: ''
+      }
+    });
+    console.log('Saved to sheet:', phone);
+  } catch (e) {
+    console.log('Sheet error:', e.message);
+  }
+};
 
 app.post('/webhook', async (req, res) => {
   const incomingMsg = req.body.Body;
   const fromNumber = req.body.From;
   const sessionId = fromNumber.replace('whatsapp:+', '');
 
+  // Save every message to Google Sheets
+  await saveToSheet(fromNumber, incomingMsg);
+
+  // Start new session
   if (!sessions[sessionId]) {
     sessions[sessionId] = true;
     try {
@@ -67,3 +93,4 @@ app.post('/webhook', async (req, res) => {
 app.listen(process.env.PORT || 3000, () => {
   console.log('DentoBot running');
 });
+SHEETY_URL = https://api.sheety.co/yourEndpointHere/dentOClockBookings/sheet1
