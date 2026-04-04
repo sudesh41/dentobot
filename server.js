@@ -93,4 +93,3 @@ app.post('/webhook', async (req, res) => {
 app.listen(process.env.PORT || 3000, () => {
   console.log('DentoBot running');
 });
-SHEETY_URL = https://api.sheety.co/yourEndpointHere/dentOClockBookings/sheet1
