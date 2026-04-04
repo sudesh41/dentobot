@@ -5,7 +5,7 @@ const twilio = require('twilio');
 const app = express();
 app.use(express.urlencoded({ extended: false }));
 
-const VOICEFLOW_API_KEY = 'VF.DM.69cd7ed90c816025783304e8.1QCcvl4oOt68ZNjE';
+const VOICEFLOW_API_KEY = process.env.VOICEFLOW_API_KEY;
 const sessions = {};
 
 app.post('/webhook', async (req, res) => {
@@ -64,6 +64,6 @@ app.post('/webhook', async (req, res) => {
   }
 });
 
-app.listen(3000, () => {
-  console.log('DentoBot running on port 3000');
+app.listen(process.env.PORT || 3000, () => {
+  console.log('DentoBot running');
 });
