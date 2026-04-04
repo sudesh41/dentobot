@@ -9,8 +9,10 @@ const VOICEFLOW_API_KEY = process.env.VOICEFLOW_API_KEY;
 const SHEETY_URL = process.env.SHEETY_URL;
 const sessions = {};
 
-// Save to Google Sheets
-const saveToSheet = async (phone, message) => {
+// Store conversation state per user
+const bookingData = {};
+
+const saveBooking = async (data) => {
   if (!SHEETY_URL) return;
   try {
     await axios.post(SHEETY_URL, {
@@ -18,27 +20,68 @@ const saveToSheet = async (phone, message) => {
         timestamp: new Date().toLocaleString('en-IN', {
           timeZone: 'Asia/Kolkata'
         }),
-        patientPhone: phone.replace('whatsapp:+', '+'),
-        message: message,
-        name: '',
-        notes: ''
+        patientPhone: data.phone,
+        name: data.name || 'Not provided',
+        preferredTime: data.time || 'Not provided',
+        concern: data.concern || 'Not provided',
+        status: 'New'
       }
     });
-    console.log('Saved to sheet:', phone);
+    console.log('Booking saved:', data.phone);
   } catch (e) {
     console.log('Sheet error:', e.message);
   }
+};
+
+// Extract booking details from conversation
+const extractBookingInfo = (message, botReply, phone) => {
+  if (!bookingData[phone]) {
+    bookingData[phone] = {};
+  }
+
+  const lowerReply = botReply.toLowerCase();
+  const lowerMsg = message.toLowerCase();
+
+  // Detect name being collected
+  if (lowerReply.includes('mobile number') || 
+      lowerReply.includes('phone number')) {
+    bookingData[phone].name = message;
+  }
+
+  // Detect phone number being collected
+  if (/\d{10}/.test(message)) {
+    bookingData[phone].phone_given = message;
+  }
+
+  // Detect time preference
+  if (lowerMsg === 'morning' || 
+      lowerMsg === 'afternoon' || 
+      lowerMsg === 'evening') {
+    bookingData[phone].time = message;
+  }
+
+  // Detect concern/service
+  if (lowerReply.includes('confirm') && 
+      lowerReply.includes('noted')) {
+    bookingData[phone].concern = message;
+  }
+};
+
+// Detect if booking is confirmed
+const isBookingConfirmed = (botReply) => {
+  const lower = botReply.toLowerCase();
+  return lower.includes('your request has been noted') ||
+         lower.includes('appointment request has been') ||
+         lower.includes('see you at dento') ||
+         lower.includes("see you at dent o'clock");
 };
 
 app.post('/webhook', async (req, res) => {
   const incomingMsg = req.body.Body;
   const fromNumber = req.body.From;
   const sessionId = fromNumber.replace('whatsapp:+', '');
+  const cleanPhone = fromNumber.replace('whatsapp:+', '+');
 
-  // Save every message to Google Sheets
-  await saveToSheet(fromNumber, incomingMsg);
-
-  // Start new session
   if (!sessions[sessionId]) {
     sessions[sessionId] = true;
     try {
@@ -75,6 +118,21 @@ app.post('/webhook', async (req, res) => {
       .filter(item => item.type === 'text')
       .map(item => item.payload.message)
       .join('\n\n');
+
+    // Track booking data
+    extractBookingInfo(incomingMsg, messages, cleanPhone);
+
+    // Save to sheet only when booking is confirmed
+    if (isBookingConfirmed(messages)) {
+      await saveBooking({
+        phone: cleanPhone,
+        name: bookingData[cleanPhone]?.name,
+        time: bookingData[cleanPhone]?.time,
+        concern: bookingData[cleanPhone]?.concern
+      });
+      // Reset booking data for this user
+      delete bookingData[cleanPhone];
+    }
 
     const twiml = new twilio.twiml.MessagingResponse();
     twiml.message(messages || "Sorry, could you rephrase that?");
