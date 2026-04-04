@@ -9,7 +9,7 @@ const VOICEFLOW_API_KEY = process.env.VOICEFLOW_API_KEY;
 const SHEETY_URL = process.env.SHEETY_URL;
 
 // Google Maps link for DentO'Clock
-const MAPS_LINK = 'https://maps.google.com/?q=DentOClock+Dental+Care+Raidurg+Hyderabad';
+const MAPS_LINK = 'https://maps.app.goo.gl/EK6RcwcDWV7um2M29';
 
 const sessions = {};
 const bookingData = {};
