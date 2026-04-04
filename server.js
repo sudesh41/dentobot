@@ -7,9 +7,11 @@ app.use(express.urlencoded({ extended: false }));
 
 const VOICEFLOW_API_KEY = process.env.VOICEFLOW_API_KEY;
 const SHEETY_URL = process.env.SHEETY_URL;
-const sessions = {};
 
-// Store conversation state per user
+// Google Maps link for DentO'Clock
+const MAPS_LINK = 'https://maps.google.com/?q=DentOClock+Dental+Care+Raidurg+Hyderabad';
+
+const sessions = {};
 const bookingData = {};
 
 const saveBooking = async (data) => {
@@ -20,67 +22,94 @@ const saveBooking = async (data) => {
         timestamp: new Date().toLocaleString('en-IN', {
           timeZone: 'Asia/Kolkata'
         }),
-        patientPhone: data.phone,
+        patientPhone: data.patientPhone,
         name: data.name || 'Not provided',
         preferredTime: data.time || 'Not provided',
         concern: data.concern || 'Not provided',
         status: 'New'
       }
     });
-    console.log('Booking saved:', data.phone);
+    console.log('Booking saved for:', data.patientPhone);
   } catch (e) {
     console.log('Sheet error:', e.message);
   }
 };
 
-// Extract booking details from conversation
-const extractBookingInfo = (message, botReply, phone) => {
-  if (!bookingData[phone]) {
-    bookingData[phone] = {};
+const extractBookingInfo = (message, botReply, sessionId) => {
+  if (!bookingData[sessionId]) {
+    bookingData[sessionId] = {};
   }
 
   const lowerReply = botReply.toLowerCase();
-  const lowerMsg = message.toLowerCase();
+  const lowerMsg = message.toLowerCase().trim();
 
-  // Detect name being collected
-  if (lowerReply.includes('mobile number') || 
-      lowerReply.includes('phone number')) {
-    bookingData[phone].name = message;
+  // Extract name — bot just asked for mobile number
+  if (lowerReply.includes('mobile number') ||
+      lowerReply.includes('phone number') ||
+      lowerReply.includes('share your mobile')) {
+    bookingData[sessionId].name = message;
   }
 
-  // Detect phone number being collected
-  if (/\d{10}/.test(message)) {
-    bookingData[phone].phone_given = message;
+  // Extract phone number — 10 digit number typed by patient
+  if (/^\d{10}$/.test(message.trim())) {
+    bookingData[sessionId].patientPhone = message.trim();
   }
 
-  // Detect time preference
-  if (lowerMsg === 'morning' || 
-      lowerMsg === 'afternoon' || 
-      lowerMsg === 'evening') {
-    bookingData[phone].time = message;
+  // Extract time preference
+  if (['morning', 'afternoon', 'evening'].includes(lowerMsg)) {
+    bookingData[sessionId].time = message;
   }
 
-  // Detect concern/service
-  if (lowerReply.includes('confirm') && 
-      lowerReply.includes('noted')) {
-    bookingData[phone].concern = message;
+  // Extract concern — last message before confirmation
+  if (lowerReply.includes('your request has been noted') ||
+      lowerReply.includes('see you at dento') ||
+      lowerReply.includes("see you at dent o'clock")) {
+    bookingData[sessionId].concern = message;
   }
 };
 
-// Detect if booking is confirmed
 const isBookingConfirmed = (botReply) => {
   const lower = botReply.toLowerCase();
   return lower.includes('your request has been noted') ||
-         lower.includes('appointment request has been') ||
          lower.includes('see you at dento') ||
          lower.includes("see you at dent o'clock");
+};
+
+const isLocationRequest = (message) => {
+  const lower = message.toLowerCase();
+  return lower.includes('location') ||
+         lower.includes('directions') ||
+         lower.includes('where are you') ||
+         lower.includes('address') ||
+         lower.includes('maps') ||
+         lower.includes('how to reach') ||
+         lower.includes('location pin') ||
+         lower.includes('find you');
 };
 
 app.post('/webhook', async (req, res) => {
   const incomingMsg = req.body.Body;
   const fromNumber = req.body.From;
   const sessionId = fromNumber.replace('whatsapp:+', '');
-  const cleanPhone = fromNumber.replace('whatsapp:+', '+');
+
+  // Handle location request directly — no need to go to Voiceflow
+  if (isLocationRequest(incomingMsg)) {
+    const locationReply =
+      `Here is our clinic location on Google Maps:\n\n` +
+      `${MAPS_LINK}\n\n` +
+      `DentO'clock Dental Care\n` +
+      `Raidurg, Hyderabad, Telangana\n` +
+      `Phone: +91 7670980925\n\n` +
+      `We're open daily. Walk-ins welcome, ` +
+      `appointment recommended to avoid waiting. ` +
+      `Is there anything else I can help you with?`;
+
+    const twiml = new twilio.twiml.MessagingResponse();
+    twiml.message(locationReply);
+    res.type('text/xml');
+    res.send(twiml.toString());
+    return;
+  }
 
   if (!sessions[sessionId]) {
     sessions[sessionId] = true;
@@ -120,18 +149,18 @@ app.post('/webhook', async (req, res) => {
       .join('\n\n');
 
     // Track booking data
-    extractBookingInfo(incomingMsg, messages, cleanPhone);
+    extractBookingInfo(incomingMsg, messages, sessionId);
 
-    // Save to sheet only when booking is confirmed
+    // Save to sheet only on confirmed booking
     if (isBookingConfirmed(messages)) {
+      const data = bookingData[sessionId] || {};
       await saveBooking({
-        phone: cleanPhone,
-        name: bookingData[cleanPhone]?.name,
-        time: bookingData[cleanPhone]?.time,
-        concern: bookingData[cleanPhone]?.concern
+        patientPhone: data.patientPhone || 'Not provided',
+        name: data.name,
+        time: data.time,
+        concern: data.concern
       });
-      // Reset booking data for this user
-      delete bookingData[cleanPhone];
+      delete bookingData[sessionId];
     }
 
     const twiml = new twilio.twiml.MessagingResponse();
