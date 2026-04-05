@@ -10,7 +10,6 @@ const SHEETY_URL = process.env.SHEETY_URL;
 const MAPS_LINK = 'https://maps.app.goo.gl/yourShortLinkHere';
 
 const sessions = {};
-const bookingData = {};
 
 const saveBooking = async (data) => {
   if (!SHEETY_URL) return;
@@ -28,50 +27,49 @@ const saveBooking = async (data) => {
         status: 'New'
       }
     });
-    console.log('Booking saved for:', data.patientPhone);
+    console.log('Booking saved:', data);
   } catch (e) {
     console.log('Sheet error:', e.message);
   }
 };
 
-const extractBookingInfo = (message, botReply, sessionId) => {
-  if (!bookingData[sessionId]) {
-    bookingData[sessionId] = {};
+// Extract all booking details from the confirmation message itself
+const parseConfirmationMessage = (botReply) => {
+  const data = {};
+
+  // Extract name — "Thank you [Name]!" or "Thank you, [Name]"
+  const nameMatch = botReply.match(
+    /thank you[,\s]+([A-Za-z\s]+?)[\!\.\,]/i
+  );
+  if (nameMatch) {
+    data.name = nameMatch[1].trim();
   }
 
-  const lowerReply = botReply.toLowerCase();
-  const lowerMsg = message.toLowerCase().trim();
-
-  // Extract name — bot just asked for mobile number
-  if (lowerReply.includes('mobile number') ||
-      lowerReply.includes('phone number') ||
-      lowerReply.includes('share your mobile')) {
-    bookingData[sessionId].name = message;
+  // Extract phone — 10 digit number in the confirmation
+  const phoneMatch = botReply.match(/\b(\d{10})\b/);
+  if (phoneMatch) {
+    data.patientPhone = phoneMatch[1];
   }
 
-  // Extract phone — 10 digit number typed by patient
-  if (/^\d{10}$/.test(message.trim())) {
-    bookingData[sessionId].patientPhone = message.trim();
+  // Extract date — "Date: 7th April" or "Date: tomorrow"
+  const dateMatch = botReply.match(/date[:\s]+([^\n]+)/i);
+  if (dateMatch) {
+    data.date = dateMatch[1].trim();
   }
 
-  // Extract date — bot just asked for preferred date
-  if (lowerReply.includes('what date') ||
-      lowerReply.includes('which date') ||
-      lowerReply.includes('preferred date') ||
-      lowerReply.includes('works best for you') &&
-      lowerReply.includes('date')) {
-    bookingData[sessionId].date = message;
+  // Extract time — "Time: Afternoon"
+  const timeMatch = botReply.match(/time[:\s]+([^\n]+)/i);
+  if (timeMatch) {
+    data.time = timeMatch[1].trim();
   }
 
-  // Extract time preference
-  if (['morning', 'afternoon', 'evening'].includes(lowerMsg)) {
-    bookingData[sessionId].time = message;
+  // Extract concern — "Concern: Just general checkup"
+  const concernMatch = botReply.match(/concern[:\s]+([^\n]+)/i);
+  if (concernMatch) {
+    data.concern = concernMatch[1].trim();
   }
 
-  // Extract concern — message right before confirmation
-  if (isBookingConfirmed(botReply)) {
-    bookingData[sessionId].concern = message;
-  }
+  return data;
 };
 
 const isBookingConfirmed = (botReply) => {
@@ -153,20 +151,11 @@ app.post('/webhook', async (req, res) => {
       .map(item => item.payload.message)
       .join('\n\n');
 
-    // Track booking data
-    extractBookingInfo(incomingMsg, messages, sessionId);
-
-    // Save to sheet only on confirmed booking
+    // When booking confirmed, parse details from confirmation message
     if (isBookingConfirmed(messages)) {
-      const data = bookingData[sessionId] || {};
-      await saveBooking({
-        patientPhone: data.patientPhone,
-        name: data.name,
-        time: data.time,
-        date: data.date,
-        concern: data.concern
-      });
-      delete bookingData[sessionId];
+      const bookingDetails = parseConfirmationMessage(messages);
+      console.log('Parsed booking:', bookingDetails);
+      await saveBooking(bookingDetails);
     }
 
     const twiml = new twilio.twiml.MessagingResponse();
