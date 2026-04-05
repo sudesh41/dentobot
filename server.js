@@ -7,9 +7,7 @@ app.use(express.urlencoded({ extended: false }));
 
 const VOICEFLOW_API_KEY = process.env.VOICEFLOW_API_KEY;
 const SHEETY_URL = process.env.SHEETY_URL;
-
-// Google Maps link for DentO'Clock
-const MAPS_LINK = 'https://maps.app.goo.gl/EK6RcwcDWV7um2M29';
+const MAPS_LINK = 'https://maps.app.goo.gl/yourShortLinkHere';
 
 const sessions = {};
 const bookingData = {};
@@ -22,10 +20,11 @@ const saveBooking = async (data) => {
         timestamp: new Date().toLocaleString('en-IN', {
           timeZone: 'Asia/Kolkata'
         }),
-        patientPhone: data.patientPhone,
+        patientPhone: data.patientPhone || 'Not provided',
         name: data.name || 'Not provided',
         preferredTime: data.time || 'Not provided',
         concern: data.concern || 'Not provided',
+        appointmentDate: data.date || 'Not provided',
         status: 'New'
       }
     });
@@ -50,9 +49,18 @@ const extractBookingInfo = (message, botReply, sessionId) => {
     bookingData[sessionId].name = message;
   }
 
-  // Extract phone number — 10 digit number typed by patient
+  // Extract phone — 10 digit number typed by patient
   if (/^\d{10}$/.test(message.trim())) {
     bookingData[sessionId].patientPhone = message.trim();
+  }
+
+  // Extract date — bot just asked for preferred date
+  if (lowerReply.includes('what date') ||
+      lowerReply.includes('which date') ||
+      lowerReply.includes('preferred date') ||
+      lowerReply.includes('works best for you') &&
+      lowerReply.includes('date')) {
+    bookingData[sessionId].date = message;
   }
 
   // Extract time preference
@@ -60,10 +68,8 @@ const extractBookingInfo = (message, botReply, sessionId) => {
     bookingData[sessionId].time = message;
   }
 
-  // Extract concern — last message before confirmation
-  if (lowerReply.includes('your request has been noted') ||
-      lowerReply.includes('see you at dento') ||
-      lowerReply.includes("see you at dent o'clock")) {
+  // Extract concern — message right before confirmation
+  if (isBookingConfirmed(botReply)) {
     bookingData[sessionId].concern = message;
   }
 };
@@ -92,7 +98,7 @@ app.post('/webhook', async (req, res) => {
   const fromNumber = req.body.From;
   const sessionId = fromNumber.replace('whatsapp:+', '');
 
-  // Handle location request directly — no need to go to Voiceflow
+  // Handle location request directly
   if (isLocationRequest(incomingMsg)) {
     const locationReply =
       `Here is our clinic location on Google Maps:\n\n` +
@@ -100,8 +106,7 @@ app.post('/webhook', async (req, res) => {
       `DentO'clock Dental Care\n` +
       `Raidurg, Hyderabad, Telangana\n` +
       `Phone: +91 7670980925\n\n` +
-      `We're open daily. Walk-ins welcome, ` +
-      `appointment recommended to avoid waiting. ` +
+      `Walk-ins welcome, appointment recommended. ` +
       `Is there anything else I can help you with?`;
 
     const twiml = new twilio.twiml.MessagingResponse();
@@ -155,9 +160,10 @@ app.post('/webhook', async (req, res) => {
     if (isBookingConfirmed(messages)) {
       const data = bookingData[sessionId] || {};
       await saveBooking({
-        patientPhone: data.patientPhone || 'Not provided',
+        patientPhone: data.patientPhone,
         name: data.name,
         time: data.time,
+        date: data.date,
         concern: data.concern
       });
       delete bookingData[sessionId];
